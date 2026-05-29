@@ -10,6 +10,7 @@ dotenv.config();
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const DEFAULT_GEMINI_KEY = "AIzaSyBT62DXP6fb6tRZWu7waoS4Bkt4U_NQZHs";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || DEFAULT_GEMINI_KEY;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
 if (!BOT_TOKEN) {
   console.error("❌ ERROR: La variable de entorno TELEGRAM_BOT_TOKEN no está configurada en el archivo .env.");
@@ -159,37 +160,78 @@ REGLAS DE FORMATO:
 JSON de la partida (resumido):
 ${JSON.stringify(prunedGameData)}`;
 
-    // Llamar a Gemini API (gemini-2.0-flash)
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
-    console.log("[Bot] Enviando petición a Gemini API...");
-    
-    const apiResponse = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{ text: promptText }]
-        }]
-      })
-    });
+    let aiText = "";
 
-    if (!apiResponse.ok) {
-      let detailedError = "";
-      try {
-        const errorJson = await apiResponse.json();
-        detailedError = errorJson.error?.message || JSON.stringify(errorJson);
-      } catch (_) {
-        detailedError = apiResponse.statusText || `Código de estado: ${apiResponse.status}`;
+    if (OPENROUTER_API_KEY) {
+      // Llamar a OpenRouter API (modelo free)
+      const openRouterUrl = "https://openrouter.ai/api/v1/chat/completions";
+      console.log("[Bot] Enviando petición a OpenRouter (openrouter/free)...");
+      
+      const apiResponse = await fetch(openRouterUrl, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: "openrouter/free",
+          messages: [
+            { role: "user", content: promptText }
+          ]
+        })
+      });
+
+      if (!apiResponse.ok) {
+        let detailedError = "";
+        try {
+          const errorJson = await apiResponse.json();
+          detailedError = errorJson.error?.message || JSON.stringify(errorJson);
+        } catch (_) {
+          detailedError = apiResponse.statusText || `Código de estado: ${apiResponse.status}`;
+        }
+        throw new Error(`OpenRouter Error: ${detailedError}`);
       }
-      throw new Error(detailedError);
-    }
 
-    const resJson = await apiResponse.json();
-    if (!resJson.candidates || resJson.candidates.length === 0) {
-      throw new Error("No se recibió respuesta del análisis de Gemini.");
-    }
+      const resJson = await apiResponse.json();
+      if (!resJson.choices || resJson.choices.length === 0) {
+        throw new Error("No se recibió respuesta de OpenRouter.");
+      }
+      aiText = resJson.choices[0].message?.content || "";
+      console.log("[Bot] Análisis completado con éxito desde OpenRouter.");
 
-    const aiText = resJson.candidates[0].content?.parts?.[0]?.text || "";
+    } else {
+      // Llamar a Gemini API directo (gemini-2.0-flash)
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+      console.log("[Bot] Enviando petición a Gemini API...");
+      
+      const apiResponse = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: promptText }]
+          }]
+        })
+      });
+
+      if (!apiResponse.ok) {
+        let detailedError = "";
+        try {
+          const errorJson = await apiResponse.json();
+          detailedError = errorJson.error?.message || JSON.stringify(errorJson);
+        } catch (_) {
+          detailedError = apiResponse.statusText || `Código de estado: ${apiResponse.status}`;
+        }
+        throw new Error(`Gemini Error: ${detailedError}`);
+      }
+
+      const resJson = await apiResponse.json();
+      if (!resJson.candidates || resJson.candidates.length === 0) {
+        throw new Error("No se recibió respuesta del análisis de Gemini.");
+      }
+      aiText = resJson.candidates[0].content?.parts?.[0]?.text || "";
+      console.log("[Bot] Análisis completado con éxito desde Gemini directo.");
+    }
     
     // Editar mensaje de estado con el veredicto final (enviado sin parse_mode para evitar crashes por Markdown de Gemini)
     await ctx.telegram.editMessageText(
