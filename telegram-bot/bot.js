@@ -321,23 +321,32 @@ const server = http.createServer((req, res) => {
         const chatMatch = text.match(/<@(\d+)>/);
         const gameMatch = text.match(/game\/(\d+)/i) || text.match(/#(\d+)/);
         
-        if (chatMatch && gameMatch) {
+        if (chatMatch) {
           const chatId = chatMatch[1];
-          const gameId = gameMatch[1];
-          console.log(`[Webhook] Notificación de turno para el chat ${chatId} en la partida #${gameId}`);
-          
-          // Enviar alerta inicial al chat
-          await bot.telegram.sendMessage(
-            chatId, 
-            `🔔 <b>¡Es tu turno en 18xx.games!</b>\nPartida #${gameId}\nAnalizando tablero con Gemini para sugerirte movimientos...`, 
-            { parse_mode: 'HTML' }
-          );
-          
-          // Ejecutar análisis estratégico automático
-          analyzeAndReply(gameId, chatId).catch(err => {
-            console.error("[Webhook] Error analizando partida automáticamente:", err);
-            bot.telegram.sendMessage(chatId, `❌ Error en el análisis automático de tu turno: ${err.message}`);
-          });
+          if (gameMatch) {
+            const gameId = gameMatch[1];
+            console.log(`[Webhook] Notificación de turno para el chat ${chatId} en la partida #${gameId}`);
+            
+            // Enviar alerta inicial al chat
+            await bot.telegram.sendMessage(
+              chatId, 
+              `🔔 <b>¡Es tu turno en 18xx.games!</b>\nPartida #${gameId}\nAnalizando tablero con Gemini para sugerirte movimientos...`, 
+              { parse_mode: 'HTML' }
+            );
+            
+            // Ejecutar análisis estratégico automático
+            analyzeAndReply(gameId, chatId).catch(err => {
+              console.error("[Webhook] Error analizando partida automáticamente:", err);
+              bot.telegram.sendMessage(chatId, `❌ Error en el análisis automático de tu turno: ${err.message}`);
+            });
+          } else {
+            console.log(`[Webhook] Notificación de prueba recibida para el chat ${chatId}`);
+            await bot.telegram.sendMessage(
+              chatId,
+              `🔔 <b>¡Conexión exitosa!</b> Has recibido una notificación de prueba de 18xx.games. Tu webhook y Chat ID están correctamente vinculados.`,
+              { parse_mode: 'HTML' }
+            );
+          }
         }
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
