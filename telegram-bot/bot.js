@@ -49,6 +49,37 @@ function escapeHtml(text) {
     .replace(/>/g, "&gt;");
 }
 
+// Convierte formateo Markdown simple a HTML seguro
+function formatMarkdownToHtml(text) {
+  let safeText = escapeHtml(text);
+  // Reemplazar **negrita** por <b>negrita</b>
+  safeText = safeText.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+  // Reemplazar *cursiva* por <i>cursiva</i>
+  safeText = safeText.replace(/\*(.*?)\*/g, '<i>$1</i>');
+  // Reemplazar `código` por <code>código</code>
+  safeText = safeText.replace(/`(.*?)`/g, '<code>$1</code>');
+  return safeText;
+}
+
+// Formatea el nombre de la fase (Stock Round / Operating Round) incluyendo el turno y sub-turno
+function formatRound(round, turn) {
+  if (!round) return "";
+  const roundLower = round.toLowerCase();
+  
+  if (roundLower.includes("stock")) {
+    return `Stock Round ${turn}`;
+  }
+  
+  if (roundLower.includes("operating")) {
+    // Si contiene un número de OR, ej: "Operating Round 1" -> extraemos el 1
+    const match = round.match(/\d+/);
+    const orNum = match ? match[0] : "1";
+    return `Operating Round ${turn}.${orNum}`;
+  }
+  
+  return `${round} ${turn}`;
+}
+
 const bot = new Telegraf(BOT_TOKEN);
 
 // Comando de inicio
@@ -140,12 +171,15 @@ async function analyzeAndReply(gameId, chatId, targetMsgId = null, manualUsernam
   // Si se pasa un nombre en el mismo mensaje, tiene prioridad; si no, se usa el guardado persistente
   const targetUsername = manualUsername || userSessions.get(chatId.toString());
 
+  const generalInstructions = `
+Calcula y muestra el dinero (Cash) y el valor neto (Worth) estimado de cada uno de los jugadores (incluyendo el orden de mayor a menor valor de Worth) al inicio de tu respuesta en una sección estructurada.`;
+
   if (targetUsername) {
-    targetInstructions = `El usuario al que debes ayudar es "${targetUsername}". Identifica cuál es su ID en la lista de jugadores ("players") y analiza su situación actual en la partida.
+    targetInstructions = `El usuario al que debes ayudar es "${targetUsername}". Identifica cuál es su ID en la lista de jugadores ("players") y analiza su situación actual en la partida.${generalInstructions}
 - Si actualmente es su turno (está en la lista "acting"), dale 3 consejos estratégicos prioritarios en español para su jugada.
 - Si NO es su turno, indícale de quién es el turno actual y dale 3 consejos estratégicos de planificación y preparación para cuando le vuelva a tocar el turno, considerando las acciones recientes y su posición de cara al futuro.`;
   } else {
-    targetInstructions = `Determina de qué jugador es el turno actual (campo "acting" y las últimas acciones) y dale 3 consejos estratégicos clave en español para su próximo movimiento (ya sea en Ronda de Acciones o de Operaciones).`;
+    targetInstructions = `Determina de qué jugador es el turno actual (campo "acting" y las últimas acciones) y dale 3 consejos estratégicos clave en español para su próximo movimiento (ya sea en Ronda de Acciones o de Operaciones).${generalInstructions}`;
   }
 
   const jsonUrl = `https://18xx.games/api/game/${gameId}`;
@@ -250,12 +284,14 @@ ${JSON.stringify(prunedGameData)}`;
 
   const gameTitle = gameData.title || "18xx";
   const gameDesc = gameData.description || "";
-  const escapedAiText = escapeHtml(aiText);
+  const formattedRound = formatRound(gameData.round, gameData.turn);
+  const formattedAiText = formatMarkdownToHtml(aiText);
 
   const finalMessage = `📋 <b>Análisis Estratégico [${gameTitle}]</b>\n` +
                        `🎮 <i>${gameDesc}</i>\n` +
+                       `📅 <b>Fase:</b> ${formattedRound}\n` +
                        `🔗 <a href="https://18xx.games/game/${gameId}">Abrir partida #${gameId}</a>\n\n` +
-                       `${escapedAiText}`;
+                       `${formattedAiText}`;
 
   if (targetMsgId) {
     await bot.telegram.editMessageText(
@@ -304,7 +340,7 @@ bot.on('text', async (ctx) => {
   }
 
   // Enviar mensaje de "cargando"
-  const statusMsg = await ctx.reply("🔌 Conectando con 18xx.games y analizando la partida con Gemini...");
+  const statusMsg = await ctx.reply("🔌 Conectando con 18xx.games y analizando la partida...");
 
   try {
     await analyzeAndReply(gameId, ctx.chat.id, statusMsg.message_id, manualUsername);
@@ -366,7 +402,7 @@ const server = http.createServer((req, res) => {
               `🔔 <b>¡Es tu turno en 18xx.games!</b>\n` +
               `🎮 <b>Partida:</b> [${gameTitle}] ${gameDesc ? `<i>${gameDesc}</i>` : ''}\n` +
               `🔗 <a href="https://18xx.games/game/${gameId}">Abrir partida #${gameId}</a>\n\n` +
-              `Analizando tablero con Gemini para sugerirte movimientos...`, 
+              `Analizando tablero para sugerirte movimientos...`, 
               { parse_mode: 'HTML', disable_web_page_preview: true }
             );
             
