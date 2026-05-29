@@ -49,15 +49,23 @@ function escapeHtml(text) {
     .replace(/>/g, "&gt;");
 }
 
-// Convierte formateo Markdown simple a HTML seguro
+// Convierte formateo Markdown simple a HTML seguro para Telegram
 function formatMarkdownToHtml(text) {
+  if (!text) return "";
   let safeText = escapeHtml(text);
-  // Reemplazar **negrita** por <b>negrita</b>
-  safeText = safeText.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-  // Reemplazar *cursiva* por <i>cursiva</i>
-  safeText = safeText.replace(/\*(.*?)\*/g, '<i>$1</i>');
-  // Reemplazar `código` por <code>código</code>
+
+  // 1. Primero ***negrita+cursiva*** (debe ir antes que ** y *)
+  safeText = safeText.replace(/\*\*\*(.*?)\*\*\*/gs, '<b><i>$1</i></b>');
+  // 2. Luego **negrita**
+  safeText = safeText.replace(/\*\*(.*?)\*\*/gs, '<b>$1</b>');
+  // 3. Luego *cursiva* o _cursiva_ (solo si no quedan asteriscos sueltos de lo anterior)
+  safeText = safeText.replace(/\*(.*?)\*/gs, '<i>$1</i>');
+  safeText = safeText.replace(/_(.*?)_/gs, '<i>$1</i>');
+  // 4. `código`
   safeText = safeText.replace(/`(.*?)`/g, '<code>$1</code>');
+  // 5. ### Encabezados → <b>
+  safeText = safeText.replace(/^#{1,3}\s+(.*?)$/gm, '<b>$1</b>');
+
   return safeText;
 }
 
