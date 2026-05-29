@@ -41,6 +41,14 @@ function saveSessions() {
   }
 }
 
+function escapeHtml(text) {
+  if (!text) return "";
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 const bot = new Telegraf(BOT_TOKEN);
 
 // Comando de inicio
@@ -240,19 +248,28 @@ ${JSON.stringify(prunedGameData)}`;
     console.log("[Bot] Análisis completado con éxito desde Gemini directo.");
   }
 
-  const finalMessage = `📋 Análisis Estratégico (Partida #${gameId})\n\n${aiText}`;
+  const gameTitle = gameData.title || "18xx";
+  const gameDesc = gameData.description || "";
+  const escapedAiText = escapeHtml(aiText);
+
+  const finalMessage = `📋 <b>Análisis Estratégico [${gameTitle}]</b>\n` +
+                       `🎮 <i>${gameDesc}</i>\n` +
+                       `🔗 <a href="https://18xx.games/game/${gameId}">Abrir partida #${gameId}</a>\n\n` +
+                       `${escapedAiText}`;
 
   if (targetMsgId) {
     await bot.telegram.editMessageText(
       chatId,
       targetMsgId,
       null,
-      finalMessage
+      finalMessage,
+      { parse_mode: 'HTML', disable_web_page_preview: true }
     );
   } else {
     await bot.telegram.sendMessage(
       chatId,
-      finalMessage
+      finalMessage,
+      { parse_mode: 'HTML', disable_web_page_preview: true }
     );
   }
 }
@@ -329,11 +346,28 @@ const server = http.createServer((req, res) => {
             const gameId = gameMatch[1];
             console.log(`[Webhook] Notificación de turno para el chat ${chatId} en la partida #${gameId}`);
             
+            // Pre-obtener los metadatos de la partida (título y descripción) para la notificación inicial
+            let gameTitle = "18xx";
+            let gameDesc = "";
+            try {
+              const res = await fetch(`https://18xx.games/api/game/${gameId}`);
+              if (res.ok) {
+                const data = await res.json();
+                gameTitle = data.title || "18xx";
+                gameDesc = data.description || "";
+              }
+            } catch (err) {
+              console.warn("⚠️ No se pudo pre-obtener datos de la partida:", err.message);
+            }
+
             // Enviar alerta inicial al chat
             await bot.telegram.sendMessage(
               chatId, 
-              `🔔 <b>¡Es tu turno en 18xx.games!</b>\nPartida #${gameId}\nAnalizando tablero con Gemini para sugerirte movimientos...`, 
-              { parse_mode: 'HTML' }
+              `🔔 <b>¡Es tu turno en 18xx.games!</b>\n` +
+              `🎮 <b>Partida:</b> [${gameTitle}] ${gameDesc ? `<i>${gameDesc}</i>` : ''}\n` +
+              `🔗 <a href="https://18xx.games/game/${gameId}">Abrir partida #${gameId}</a>\n\n` +
+              `Analizando tablero con Gemini para sugerirte movimientos...`, 
+              { parse_mode: 'HTML', disable_web_page_preview: true }
             );
             
             // Ejecutar análisis estratégico automático
