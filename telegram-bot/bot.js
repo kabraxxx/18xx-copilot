@@ -1,9 +1,11 @@
 import { Telegraf } from 'telegraf';
 import dotenv from 'dotenv';
 import fetch from 'node-fetch';
+import http from 'http';
 
 // Cargar variables de entorno
 dotenv.config();
+
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const DEFAULT_GEMINI_KEY = "AIzaSyBT62DXP6fb6tRZWu7waoS4Bkt4U_NQZHs";
@@ -211,6 +213,16 @@ ${JSON.stringify(prunedGameData)}`;
   }
 });
 
+// Servidor HTTP simple para responder a los pings de Render (y así poder usar el plan gratuito Web Service)
+const PORT = process.env.PORT || 8080;
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('ChooChooCopilotBot is running!\n');
+});
+server.listen(PORT, () => {
+  console.log(`📡 Servidor de salud (ping) escuchando en el puerto ${PORT}`);
+});
+
 // Lanzar el bot
 bot.launch().then(() => {
   console.log("🚀 ¡ChooChooCopilotBot está en marcha y listo para recibir partidas!");
@@ -219,5 +231,12 @@ bot.launch().then(() => {
 });
 
 // Manejo seguro del apagado del bot
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+process.once('SIGINT', () => {
+  server.close();
+  bot.stop('SIGINT');
+});
+process.once('SIGTERM', () => {
+  server.close();
+  bot.stop('SIGTERM');
+});
+
