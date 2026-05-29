@@ -2,10 +2,11 @@ import { Telegraf } from 'telegraf';
 import dotenv from 'dotenv';
 import fetch from 'node-fetch';
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
 
 // Cargar variables de entorno
 dotenv.config();
-
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const DEFAULT_GEMINI_KEY = "AIzaSyBT62DXP6fb6tRZWu7waoS4Bkt4U_NQZHs";
@@ -17,8 +18,28 @@ if (!BOT_TOKEN) {
   process.exit(1);
 }
 
-// Base de datos en memoria para guardar el usuario de 18xx.games asociado a cada chat de Telegram
-const userSessions = new Map();
+// Base de datos en archivo local para persistir el usuario de 18xx.games asociado a cada chat
+const SESSIONS_FILE = path.join(process.cwd(), 'sessions.json');
+let userSessions = new Map();
+
+try {
+  if (fs.existsSync(SESSIONS_FILE)) {
+    const data = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
+    userSessions = new Map(Object.entries(data));
+    console.log(`💾 Sesiones cargadas desde el disco: ${userSessions.size} usuarios.`);
+  }
+} catch (e) {
+  console.warn("⚠️ No se pudieron cargar las sesiones desde el disco:", e.message);
+}
+
+function saveSessions() {
+  try {
+    const obj = Object.fromEntries(userSessions);
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(obj, null, 2), 'utf8');
+  } catch (e) {
+    console.warn("⚠️ No se pudieron guardar las sesiones en el disco:", e.message);
+  }
+}
 
 const bot = new Telegraf(BOT_TOKEN);
 
@@ -67,14 +88,15 @@ bot.command('username', (ctx) => {
   }
 
   const chatId = ctx.chat.id;
-  userSessions.set(chatId, targetUser);
+  userSessions.set(chatId.toString(), targetUser);
+  saveSessions();
   ctx.reply(`✅ Guardado: Ahora te identificaré como *${targetUser}* en tus partidas analizadas.`);
 });
 
 // Ver nombre de usuario actual
 bot.command('myusername', (ctx) => {
   const chatId = ctx.chat.id;
-  const targetUser = userSessions.get(chatId);
+  const targetUser = userSessions.get(chatId.toString());
 
   if (targetUser) {
     ctx.reply(`Tu usuario asociado actual de 18xx.games es: ${targetUser}`);
@@ -86,8 +108,9 @@ bot.command('myusername', (ctx) => {
 // Limpiar nombre de usuario
 bot.command('clear', (ctx) => {
   const chatId = ctx.chat.id;
-  if (userSessions.has(chatId)) {
-    userSessions.delete(chatId);
+  if (userSessions.has(chatId.toString())) {
+    userSessions.delete(chatId.toString());
+    saveSessions();
     ctx.reply("🧹 Se ha eliminado tu nombre de usuario asociado.");
   } else {
     ctx.reply("No tenías ningún usuario asociado.");
@@ -100,15 +123,22 @@ bot.on('text', async (ctx) => {
 
   // Expresiones regulares para detectar URLs de 18xx.games o IDs numéricos de 5 a 8 dígitos
   const urlRegex = /18xx\.games\/game\/(\d+)/i;
-  const idRegex = /^\d{5,8}$/;
+  const idRegex = /(?:^|\s)(\d{5,8})(?:\s|$)/;
 
   let gameId = null;
+  let manualUsername = "";
 
   const urlMatch = messageText.match(urlRegex);
   if (urlMatch) {
     gameId = urlMatch[1];
-  } else if (idRegex.test(messageText)) {
-    gameId = messageText;
+    // Intentar extraer el nombre de usuario de lo restante del mensaje
+    manualUsername = messageText.replace(urlMatch[0], '').replace(/https?:\/\//gi, '').replace(/\s+/g, ' ').trim();
+  } else {
+    const idMatch = messageText.match(idRegex);
+    if (idMatch) {
+      gameId = idMatch[1];
+      manualUsername = messageText.replace(idMatch[1], '').replace(/\s+/g, ' ').trim();
+    }
   }
 
   // Si no coincide con un patrón de partida, no hacemos nada (permitimos flujo normal)
@@ -138,7 +168,8 @@ bot.on('text', async (ctx) => {
 
     // Obtener configuración de usuario para este chat
     const chatId = ctx.chat.id;
-    const targetUsername = userSessions.get(chatId);
+    // Si se pasa un nombre en el mismo mensaje, tiene prioridad; si no, se usa el guardado persistente
+    const targetUsername = manualUsername || userSessions.get(chatId.toString());
 
     let targetInstructions = '';
     if (targetUsername) {
