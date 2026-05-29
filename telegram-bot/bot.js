@@ -119,7 +119,7 @@ bot.on('text', async (ctx) => {
   const statusMsg = await ctx.reply("🔌 Conectando con 18xx.games y analizando la partida con Gemini...");
 
   try {
-    const jsonUrl = `https://18xx.games/game/${gameId}/json`;
+    const jsonUrl = `https://18xx.games/api/game/${gameId}`;
     console.log(`[Bot] Obteniendo JSON de la partida desde: ${jsonUrl}`);
 
     const response = await fetch(jsonUrl);
