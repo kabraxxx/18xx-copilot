@@ -25,33 +25,33 @@ const bot = new Telegraf(BOT_TOKEN);
 bot.start((ctx) => {
   const username = ctx.from.first_name || "maquinista";
   ctx.reply(
-    `🚂 ¡Hola, ${username}! Bienvenido a *ChooChooCopilotBot*.\n\n` +
-    `Soy tu asistente estratégico de IA para partidas de *18xx.games*.\n\n` +
-    `*¿Cómo usarme?*\n` +
-    `1. Envía el enlace de una partida en curso (ej: \`https://18xx.games/game/254383\`) o simplemente el ID numérico de la partida (ej: \`254383\`).\n` +
+    `🚂 <b>¡Hola, ${username}! Bienvenido a ChooChooCopilotBot.</b>\n\n` +
+    `Soy tu asistente estratégico de IA para partidas de <b>18xx.games</b>.\n\n` +
+    `<b>¿Cómo usarme?</b>\n` +
+    `1. Envía el enlace de una partida en curso (ej: <code>https://18xx.games/game/254383</code>) o simplemente el ID numérico de la partida (ej: <code>254383</code>).\n` +
     `2. Analizaré el estado actual y te daré 3 consejos estratégicos clave.\n\n` +
-    `*Comandos útiles:*\n` +
-    `• /username <tu_usuario> - Asocia tu nombre de 18xx.games para recibir consejos personalizados.\n` +
+    `<b>Comandos útiles:</b>\n` +
+    `• /username [tu_usuario] - Asocia tu nombre de 18xx.games para recibir consejos personalizados.\n` +
     `• /myusername - Consulta qué nombre de usuario tienes asociado.\n` +
     `• /clear - Elimina tu nombre de usuario asociado.\n` +
     `• /help - Muestra la ayuda y el funcionamiento.`,
-    { parse_mode: 'Markdown' }
+    { parse_mode: 'HTML' }
   );
 });
 
 // Ayuda
 bot.help((ctx) => {
   ctx.reply(
-    `📖 *Ayuda de ChooChooCopilotBot*\n\n` +
-    `• *Análisis de partida:* Envía un enlace de 18xx.games o un ID numérico de partida. El bot obtendrá los datos del juego de forma segura y consultará con Gemini.\n\n` +
-    `• *Asociar usuario:* Si usas \`/username tu_usuario\`, el bot sabrá quién eres. Así, cuando analice una partida:\n` +
+    `📖 <b>Ayuda de ChooChooCopilotBot</b>\n\n` +
+    `• <b>Análisis de partida:</b> Envía un enlace de 18xx.games o un ID numérico de partida. El bot obtendrá los datos del juego de forma segura y consultará con Gemini.\n\n` +
+    `• <b>Asociar usuario:</b> Si usas <code>/username tu_usuario</code>, el bot sabrá quién eres. Así, cuando analice una partida:\n` +
     `   - Si es tu turno, te dará consejos directos para tu jugada.\n` +
     `   - Si no es tu turno, te dirá de quién es y te dará consejos de planificación para cuando te toque.\n\n` +
-    `*Ejemplos de enlace de partida:*\n` +
-    `• \`https://18xx.games/game/254383\`\n` +
-    `• \`254383\`\n\n` +
-    `💡 _Nota: Para que el análisis funcione, la partida debe ser pública en 18xx.games._`,
-    { parse_mode: 'Markdown' }
+    `<b>Ejemplos de enlace de partida:</b>\n` +
+    `• <code>https://18xx.games/game/254383</code>\n` +
+    `• <code>254383</code>\n\n` +
+    `💡 <i>Nota: Para que el análisis funcione, la partida debe ser pública en 18xx.games.</i>`,
+    { parse_mode: 'HTML' }
   );
 });
 
@@ -62,12 +62,12 @@ bot.command('username', (ctx) => {
   const targetUser = args.join(' ').trim();
 
   if (!targetUser) {
-    return ctx.reply("⚠️ Por favor, especifica tu nombre de usuario de 18xx.games.\nEjemplo: `/username Daniel`", { parse_mode: 'Markdown' });
+    return ctx.reply("⚠️ Por favor, especifica tu nombre de usuario de 18xx.games.\nEjemplo: /username Daniel");
   }
 
   const chatId = ctx.chat.id;
   userSessions.set(chatId, targetUser);
-  ctx.reply(`✅ Guardado: Ahora te identificaré como *${targetUser}* en tus partidas analizadas.`, { parse_mode: 'Markdown' });
+  ctx.reply(`✅ Guardado: Ahora te identificaré como *${targetUser}* en tus partidas analizadas.`);
 });
 
 // Ver nombre de usuario actual
@@ -76,9 +76,9 @@ bot.command('myusername', (ctx) => {
   const targetUser = userSessions.get(chatId);
 
   if (targetUser) {
-    ctx.reply(`Tu usuario asociado actual de 18xx.games es: *${targetUser}*`, { parse_mode: 'Markdown' });
+    ctx.reply(`Tu usuario asociado actual de 18xx.games es: ${targetUser}`);
   } else {
-    ctx.reply("No tienes ningún usuario asociado. Usa `/username tu_usuario` para configurar uno.");
+    ctx.reply("No tienes ningún usuario asociado. Usa /username tu_usuario para configurar uno.");
   }
 });
 
@@ -191,13 +191,12 @@ ${JSON.stringify(prunedGameData)}`;
 
     const aiText = resJson.candidates[0].content?.parts?.[0]?.text || "";
     
-    // Editar mensaje de estado con el veredicto final
+    // Editar mensaje de estado con el veredicto final (enviado sin parse_mode para evitar crashes por Markdown de Gemini)
     await ctx.telegram.editMessageText(
       ctx.chat.id,
       statusMsg.message_id,
       null,
-      `📋 *Análisis Estratégico (Partida #${gameId})*\n\n${aiText}`,
-      { parse_mode: 'Markdown' }
+      `📋 Análisis Estratégico (Partida #${gameId})\n\n${aiText}`
     );
 
     console.log(`[Bot] Análisis completado con éxito para la partida #${gameId}.`);
@@ -207,8 +206,7 @@ ${JSON.stringify(prunedGameData)}`;
       ctx.chat.id,
       statusMsg.message_id,
       null,
-      `❌ *Error al analizar la partida:* ${err.message}\n\n💡 _Asegúrate de que el enlace o ID sea correcto y que la partida sea pública._`,
-      { parse_mode: 'Markdown' }
+      `❌ Error al analizar la partida: ${err.message}\n\n💡 Asegúrate de que el enlace o ID sea correcto y que la partida sea pública.`
     );
   }
 });
