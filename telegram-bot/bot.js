@@ -306,7 +306,9 @@ bot.on('text', async (ctx) => {
 // Servidor HTTP simple para responder a los pings de Render y recibir Webhooks de 18xx.games
 const PORT = process.env.PORT || 8080;
 const server = http.createServer((req, res) => {
-  if (req.method === 'POST' && req.url === '/webhook') {
+  console.log(`[HTTP] Petición recibida: ${req.method} ${req.url}`);
+  const cleanUrl = req.url.split('?')[0].replace(/\/$/, '');
+  if (req.method === 'POST' && cleanUrl === '/webhook') {
     let body = '';
     req.on('data', chunk => {
       body += chunk.toString();
