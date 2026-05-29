@@ -1,0 +1,28 @@
+{
+    "manifest_version": 3,
+    "name": "18xx Gemini Copilot",
+    "version": "1.0",
+    "description": "Asistente estratégico de IA para partidas de 18xx.games",
+    "permissions": [
+        "activeTab",
+        "storage"
+    ],
+    "host_permissions": [
+        "https://18xx.games/*",
+        "https://generativelanguage.googleapis.com/*",
+        "https://openrouter.ai/*"
+    ],
+    "action": {
+        "default_popup": "popup.html"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://18xx.games/game/*"
+            ],
+            "js": [
+                "content.js"
+            ]
+        }
+    ]
+}
