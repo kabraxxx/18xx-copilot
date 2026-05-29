@@ -117,6 +117,146 @@ bot.command('clear', (ctx) => {
   }
 });
 
+// Obtener ID del chat
+bot.command('mychatid', (ctx) => {
+  ctx.reply(
+    `ℹ️ <b>Tu ID de chat de Telegram es:</b> <code>${ctx.chat.id}</code>\n\n` +
+    `Copia este número para configurar las notificaciones automáticas en 18xx.games.`,
+    { parse_mode: 'HTML' }
+  );
+});
+
+// Función para realizar el análisis estratégico de una partida y enviar el resultado a Telegram
+async function analyzeAndReply(gameId, chatId, targetMsgId = null, manualUsername = "") {
+  let targetInstructions = '';
+  // Si se pasa un nombre en el mismo mensaje, tiene prioridad; si no, se usa el guardado persistente
+  const targetUsername = manualUsername || userSessions.get(chatId.toString());
+
+  if (targetUsername) {
+    targetInstructions = `El usuario al que debes ayudar es "${targetUsername}". Identifica cuál es su ID en la lista de jugadores ("players") y analiza su situación actual en la partida.
+- Si actualmente es su turno (está en la lista "acting"), dale 3 consejos estratégicos prioritarios en español para su jugada.
+- Si NO es su turno, indícale de quién es el turno actual y dale 3 consejos estratégicos de planificación y preparación para cuando le vuelva a tocar el turno, considerando las acciones recientes y su posición de cara al futuro.`;
+  } else {
+    targetInstructions = `Determina de qué jugador es el turno actual (campo "acting" y las últimas acciones) y dale 3 consejos estratégicos clave en español para su próximo movimiento (ya sea en Ronda de Acciones o de Operaciones).`;
+  }
+
+  const jsonUrl = `https://18xx.games/api/game/${gameId}`;
+  console.log(`[Bot] Obteniendo JSON de la partida desde: ${jsonUrl}`);
+
+  const response = await fetch(jsonUrl);
+  if (!response.ok) {
+    throw new Error(`No se pudo obtener la partida (Código: ${response.status})`);
+  }
+
+  const gameData = await response.json();
+
+  // Limitar el historial de acciones a las últimas 30 para optimizar el contexto
+  const prunedGameData = { ...gameData };
+  if (Array.isArray(prunedGameData.actions)) {
+    prunedGameData.actions = prunedGameData.actions.slice(-30);
+  }
+
+  const promptText = `Eres un experto jugador de juegos de mesa de la serie 18xx. Analiza el siguiente JSON con los datos generales y las últimas acciones de una partida en curso en 18xx.games.
+${targetInstructions}
+
+REGLAS DE FORMATO:
+- Sé muy conciso, directo y estructurado en español.
+- NO des respuestas matemáticas genéricas, NO uses fórmulas LaTeX, ni bloques como \\boxed{}.
+- Escribe una respuesta textual clara y legible.
+
+JSON de la partida (resumido):
+${JSON.stringify(prunedGameData)}`;
+
+  let aiText = "";
+
+  if (OPENROUTER_API_KEY) {
+    // Llamar a OpenRouter API (modelo free)
+    const openRouterUrl = "https://openrouter.ai/api/v1/chat/completions";
+    console.log("[Bot] Enviando petición a OpenRouter (openrouter/free)...");
+    
+    const apiResponse = await fetch(openRouterUrl, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "openrouter/free",
+        messages: [
+          { role: "user", content: promptText }
+        ]
+      })
+    });
+
+    if (!apiResponse.ok) {
+      let detailedError = "";
+      try {
+        const errorJson = await apiResponse.json();
+        detailedError = errorJson.error?.message || JSON.stringify(errorJson);
+      } catch (_) {
+        detailedError = apiResponse.statusText || `Código de estado: ${apiResponse.status}`;
+      }
+      throw new Error(`OpenRouter Error: ${detailedError}`);
+    }
+
+    const resJson = await apiResponse.json();
+    if (!resJson.choices || resJson.choices.length === 0) {
+      throw new Error("No se recibió respuesta de OpenRouter.");
+    }
+    aiText = resJson.choices[0].message?.content || "";
+    console.log("[Bot] Análisis completado con éxito desde OpenRouter.");
+
+  } else {
+    // Llamar a Gemini API directo (gemini-2.0-flash)
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+    console.log("[Bot] Enviando petición a Gemini API...");
+    
+    const apiResponse = await fetch(geminiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: promptText }]
+        }]
+      })
+    });
+
+    if (!apiResponse.ok) {
+      let detailedError = "";
+      try {
+        const errorJson = await apiResponse.json();
+        detailedError = errorJson.error?.message || JSON.stringify(errorJson);
+      } catch (_) {
+        detailedError = apiResponse.statusText || `Código de estado: ${apiResponse.status}`;
+      }
+      throw new Error(`Gemini Error: ${detailedError}`);
+    }
+
+    const resJson = await apiResponse.json();
+    if (!resJson.candidates || resJson.candidates.length === 0) {
+      throw new Error("No se recibió respuesta del análisis de Gemini.");
+    }
+    aiText = resJson.candidates[0].content?.parts?.[0]?.text || "";
+    console.log("[Bot] Análisis completado con éxito desde Gemini directo.");
+  }
+
+  const finalMessage = `📋 Análisis Estratégico (Partida #${gameId})\n\n${aiText}`;
+
+  if (targetMsgId) {
+    await bot.telegram.editMessageText(
+      chatId,
+      targetMsgId,
+      null,
+      finalMessage
+    );
+  } else {
+    await bot.telegram.sendMessage(
+      chatId,
+      finalMessage
+    );
+  }
+}
+
 // Escuchar mensajes de texto para detectar enlaces o IDs de partidas
 bot.on('text', async (ctx) => {
   const messageText = ctx.message.text.trim();
@@ -150,128 +290,7 @@ bot.on('text', async (ctx) => {
   const statusMsg = await ctx.reply("🔌 Conectando con 18xx.games y analizando la partida con Gemini...");
 
   try {
-    const jsonUrl = `https://18xx.games/api/game/${gameId}`;
-    console.log(`[Bot] Obteniendo JSON de la partida desde: ${jsonUrl}`);
-
-    const response = await fetch(jsonUrl);
-    if (!response.ok) {
-      throw new Error(`No se pudo obtener la partida (Código: ${response.status})`);
-    }
-
-    const gameData = await response.json();
-
-    // Limitar el historial de acciones a las últimas 30 para optimizar el contexto
-    const prunedGameData = { ...gameData };
-    if (Array.isArray(prunedGameData.actions)) {
-      prunedGameData.actions = prunedGameData.actions.slice(-30);
-    }
-
-    // Obtener configuración de usuario para este chat
-    const chatId = ctx.chat.id;
-    // Si se pasa un nombre en el mismo mensaje, tiene prioridad; si no, se usa el guardado persistente
-    const targetUsername = manualUsername || userSessions.get(chatId.toString());
-
-    let targetInstructions = '';
-    if (targetUsername) {
-      targetInstructions = `El usuario al que debes ayudar es "${targetUsername}". Identifica cuál es su ID en la lista de jugadores ("players") y analiza su situación actual en la partida.
-- Si actualmente es su turno (está en la lista "acting"), dale 3 consejos estratégicos prioritarios en español para su jugada.
-- Si NO es su turno, indícale de quién es el turno actual y dale 3 consejos estratégicos de planificación y preparación para cuando le vuelva a tocar el turno, considerando las acciones recientes y su posición de cara al futuro.`;
-    } else {
-      targetInstructions = `Determina de qué jugador es el turno actual (campo "acting" y las últimas acciones) y dale 3 consejos estratégicos clave en español para su próximo movimiento (ya sea en Ronda de Acciones o de Operaciones).`;
-    }
-
-    const promptText = `Eres un experto jugador de juegos de mesa de la serie 18xx. Analiza el siguiente JSON con los datos generales y las últimas acciones de una partida en curso en 18xx.games.
-${targetInstructions}
-
-REGLAS DE FORMATO:
-- Sé muy conciso, directo y estructurado en español.
-- NO des respuestas matemáticas genéricas, NO uses fórmulas LaTeX, ni bloques como \\boxed{}.
-- Escribe una respuesta textual clara y legible.
-
-JSON de la partida (resumido):
-${JSON.stringify(prunedGameData)}`;
-
-    let aiText = "";
-
-    if (OPENROUTER_API_KEY) {
-      // Llamar a OpenRouter API (modelo free)
-      const openRouterUrl = "https://openrouter.ai/api/v1/chat/completions";
-      console.log("[Bot] Enviando petición a OpenRouter (openrouter/free)...");
-      
-      const apiResponse = await fetch(openRouterUrl, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${OPENROUTER_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: "openrouter/free",
-          messages: [
-            { role: "user", content: promptText }
-          ]
-        })
-      });
-
-      if (!apiResponse.ok) {
-        let detailedError = "";
-        try {
-          const errorJson = await apiResponse.json();
-          detailedError = errorJson.error?.message || JSON.stringify(errorJson);
-        } catch (_) {
-          detailedError = apiResponse.statusText || `Código de estado: ${apiResponse.status}`;
-        }
-        throw new Error(`OpenRouter Error: ${detailedError}`);
-      }
-
-      const resJson = await apiResponse.json();
-      if (!resJson.choices || resJson.choices.length === 0) {
-        throw new Error("No se recibió respuesta de OpenRouter.");
-      }
-      aiText = resJson.choices[0].message?.content || "";
-      console.log("[Bot] Análisis completado con éxito desde OpenRouter.");
-
-    } else {
-      // Llamar a Gemini API directo (gemini-2.0-flash)
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
-      console.log("[Bot] Enviando petición a Gemini API...");
-      
-      const apiResponse = await fetch(geminiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{ text: promptText }]
-          }]
-        })
-      });
-
-      if (!apiResponse.ok) {
-        let detailedError = "";
-        try {
-          const errorJson = await apiResponse.json();
-          detailedError = errorJson.error?.message || JSON.stringify(errorJson);
-        } catch (_) {
-          detailedError = apiResponse.statusText || `Código de estado: ${apiResponse.status}`;
-        }
-        throw new Error(`Gemini Error: ${detailedError}`);
-      }
-
-      const resJson = await apiResponse.json();
-      if (!resJson.candidates || resJson.candidates.length === 0) {
-        throw new Error("No se recibió respuesta del análisis de Gemini.");
-      }
-      aiText = resJson.candidates[0].content?.parts?.[0]?.text || "";
-      console.log("[Bot] Análisis completado con éxito desde Gemini directo.");
-    }
-    
-    // Editar mensaje de estado con el veredicto final (enviado sin parse_mode para evitar crashes por Markdown de Gemini)
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      statusMsg.message_id,
-      null,
-      `📋 Análisis Estratégico (Partida #${gameId})\n\n${aiText}`
-    );
-
+    await analyzeAndReply(gameId, ctx.chat.id, statusMsg.message_id, manualUsername);
     console.log(`[Bot] Análisis completado con éxito para la partida #${gameId}.`);
   } catch (err) {
     console.error(`[Bot] Error procesando partida:`, err);
@@ -284,19 +303,63 @@ ${JSON.stringify(prunedGameData)}`;
   }
 });
 
-// Servidor HTTP simple para responder a los pings de Render (y así poder usar el plan gratuito Web Service)
+// Servidor HTTP simple para responder a los pings de Render y recibir Webhooks de 18xx.games
 const PORT = process.env.PORT || 8080;
 const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('ChooChooCopilotBot is running!\n');
+  if (req.method === 'POST' && req.url === '/webhook') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', async () => {
+      try {
+        const payload = JSON.parse(body);
+        console.log("[Webhook] Petición recibida de 18xx.games:", payload);
+        
+        // El payload de 18xx es { text: "<@UserWebhookId> Mensaje..." }
+        const text = payload.text || "";
+        const chatMatch = text.match(/<@(\d+)>/);
+        const gameMatch = text.match(/game\/(\d+)/i) || text.match(/#(\d+)/);
+        
+        if (chatMatch && gameMatch) {
+          const chatId = chatMatch[1];
+          const gameId = gameMatch[1];
+          console.log(`[Webhook] Notificación de turno para el chat ${chatId} en la partida #${gameId}`);
+          
+          // Enviar alerta inicial al chat
+          await bot.telegram.sendMessage(
+            chatId, 
+            `🔔 <b>¡Es tu turno en 18xx.games!</b>\nPartida #${gameId}\nAnalizando tablero con Gemini para sugerirte movimientos...`, 
+            { parse_mode: 'HTML' }
+          );
+          
+          // Ejecutar análisis estratégico automático
+          analyzeAndReply(gameId, chatId).catch(err => {
+            console.error("[Webhook] Error analizando partida automáticamente:", err);
+            bot.telegram.sendMessage(chatId, `❌ Error en el análisis automático de tu turno: ${err.message}`);
+          });
+        }
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        console.error("[Webhook] Error al procesar webhook:", err);
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('Error processing webhook payload\n');
+      }
+    });
+  } else {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ChooChooCopilotBot is running!\n');
+  }
 });
 server.listen(PORT, () => {
-  console.log(`📡 Servidor de salud (ping) escuchando en el puerto ${PORT}`);
+  console.log(`📡 Servidor de salud y webhooks escuchando en el puerto ${PORT}`);
 });
 
 // Lanzar el bot
 bot.launch().then(() => {
-  console.log("🚀 ¡ChooChooCopilotBot está en marcha y listo para recibir partidas!");
+  console.log("🚀 ¡ChooChooCopilotBot está en marcha y listo para recibir partidas y webhooks!");
 }).catch((err) => {
   console.error("❌ Fallo al iniciar el bot de Telegram:", err);
 });
@@ -310,4 +373,5 @@ process.once('SIGTERM', () => {
   server.close();
   bot.stop('SIGTERM');
 });
+
 
