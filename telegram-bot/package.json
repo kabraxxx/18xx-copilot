@@ -1,0 +1,23 @@
+{
+  "name": "18xx-telegram-copilot",
+  "version": "1.0.0",
+  "description": "Telegram Bot for 18xx games analysis using Gemini",
+  "main": "bot.js",
+  "type": "module",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "node bot.js"
+  },
+  "keywords": [
+    "18xx",
+    "telegram",
+    "bot",
+    "gemini",
+    "copilot"
+  ],
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2",
+    "telegraf": "^4.16.3"
+  }
+}
