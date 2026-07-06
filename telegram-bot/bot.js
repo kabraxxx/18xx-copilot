@@ -184,10 +184,19 @@ Calcula y muestra el dinero (Cash) y el valor neto (Worth) estimado de cada uno 
 
   if (targetUsername) {
     targetInstructions = `El usuario al que debes ayudar es "${targetUsername}". Identifica cuál es su ID en la lista de jugadores ("players") y analiza su situación actual en la partida.${generalInstructions}
-- Si actualmente es su turno (está en la lista "acting"), dale 3 consejos estratégicos prioritarios en español para su jugada.
-- Si NO es su turno, indícale de quién es el turno actual y dale 3 consejos estratégicos de planificación y preparación para cuando le vuelva a tocar el turno, considerando las acciones recientes y su posición de cara al futuro.`;
+- Identifica el tipo de ronda actual ("round" puede ser SR/Stock Round o OR/Operating Round).
+- Si es su turno (está en "acting"):
+  1. Predice y recomienda la MEJOR acción inmediata a realizar (ej. comprar/vender acciones específicas en SR, o pagar/retener dividendos, comprar un tren específico en OR).
+  2. Ofrece una justificación táctica de por qué esa es la mejor opción.
+  3. Da 2 consejos estratégicos alternativos o secundarios.
+- Si NO es su turno:
+  1. Identifica de quién es el turno.
+  2. Predice qué querrá hacer el jugador activo y cómo afecta al usuario "${targetUsername}".
+  3. Recomienda 3 acciones de preparación para el turno del usuario (ej. ahorrar dinero para un tren, preparar compra de acciones de una empresa específica).`;
   } else {
-    targetInstructions = `Determina de qué jugador es el turno actual (campo "acting" y las últimas acciones) y dale 3 consejos estratégicos clave en español para su próximo movimiento (ya sea en Ronda de Acciones o de Operaciones).${generalInstructions}`;
+    targetInstructions = `Determina de qué jugador es el turno actual (campo "acting" y las últimas acciones).${generalInstructions}
+- Identifica el tipo de ronda actual ("round").
+- Recomienda las 3 mejores opciones o movimientos para el jugador activo, justificando cuál de ellas es la mejor decisión estratégica inmediata (acciones a realizar en la ronda actual).`;
   }
 
   const jsonUrl = `https://18xx.games/api/game/${gameId}`;
@@ -205,14 +214,33 @@ Calcula y muestra el dinero (Cash) y el valor neto (Worth) estimado de cada uno 
 
   const gameData = await response.json();
 
-  // Limitar el historial de acciones a las últimas 30 para optimizar el contexto
+  // Limitar y limpiar el historial de acciones (máximo 100) para optimizar el contexto en modelos gratuitos
   const prunedGameData = { ...gameData };
   if (Array.isArray(prunedGameData.actions)) {
-    prunedGameData.actions = prunedGameData.actions.slice(-30);
+    prunedGameData.actions = prunedGameData.actions.map(act => {
+      const cleanAct = { ...act };
+      delete cleanAct.created_at;
+      delete cleanAct.user;
+      if (Array.isArray(cleanAct.auto_actions)) {
+        cleanAct.auto_actions = cleanAct.auto_actions.map(autoAct => {
+          const cleanAuto = { ...autoAct };
+          delete cleanAuto.created_at;
+          delete cleanAuto.user;
+          return cleanAuto;
+        });
+      }
+      return cleanAct;
+    }).slice(-100);
   }
 
-  const promptText = `Eres un experto jugador de juegos de mesa de la serie 18xx. Analiza el siguiente JSON con los datos generales y las últimas acciones de una partida en curso en 18xx.games.
+  const promptText = `Eres un experto jugador y analista estratégico de juegos de mesa de la serie 18xx. Analiza el siguiente JSON con los datos generales y las últimas acciones de una partida en curso en 18xx.games.
+
 ${targetInstructions}
+
+PAUTAS DE ANÁLISIS ESTRATÉGICO:
+1. Diferencia estrictamente las dinámicas: en Stock Round (SR) analiza el flujo de acciones, control de empresas presididas y el orden de turno. En Operating Round (OR) analiza los trenes disponibles, el dinero en tesorería de cada corporación, si necesitan retener para evitar una compra obligatoria de tren (y posible bancarrota), y la rentabilidad de las rutas.
+2. Identifica riesgos inminentes de "Train Rush" (compra acelerada de trenes) o de quedar desprovisto de trenes (rusting).
+3. Sé directo, táctico y fundamenta tus sugerencias en los datos reales del JSON.
 
 REGLAS DE FORMATO:
 - Sé muy conciso, directo y estructurado en español.
