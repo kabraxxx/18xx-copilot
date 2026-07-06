@@ -442,21 +442,24 @@ const server = http.createServer((req, res) => {
               console.warn("⚠️ No se pudo pre-obtener datos de la partida:", err.message);
             }
 
-            // Enviar alerta inicial al chat
+            // Enviar alerta inicial al chat con un botón en línea para analizar a demanda (no automático)
             await bot.telegram.sendMessage(
               chatId, 
               `🔔 <b>¡Es tu turno en 18xx.games!</b>\n` +
               `🎮 <b>Partida:</b> [${gameTitle}] ${gameDesc ? `<i>${gameDesc}</i>` : ''}\n` +
-              `🔗 <a href="https://18xx.games/game/${gameId}">Abrir partida #${gameId}</a>\n\n` +
-              `Analizando tablero para sugerirte movimientos...`, 
-              { parse_mode: 'HTML', disable_web_page_preview: true }
+              `🔗 <a href="https://18xx.games/game/${gameId}">Abrir partida #${gameId}</a>`, 
+              { 
+                parse_mode: 'HTML', 
+                disable_web_page_preview: true,
+                reply_markup: {
+                  inline_keyboard: [
+                    [
+                      { text: "📊 Analizar partida con IA", callback_data: `analyze:${gameId}` }
+                    ]
+                  ]
+                }
+              }
             );
-            
-            // Ejecutar análisis estratégico automático
-            analyzeAndReply(gameId, chatId).catch(err => {
-              console.error("[Webhook] Error analizando partida automáticamente:", err);
-              bot.telegram.sendMessage(chatId, `❌ Error en el análisis automático de tu turno: ${err.message}`);
-            });
           } else {
             console.log(`[Webhook] Notificación de prueba recibida para el chat ${chatId}`);
             await bot.telegram.sendMessage(
@@ -482,6 +485,30 @@ const server = http.createServer((req, res) => {
 });
 server.listen(PORT, () => {
   console.log(`📡 Servidor de salud y webhooks escuchando en el puerto ${PORT}`);
+});
+
+// Manejar la acción del botón inline para analizar la partida a demanda
+bot.action(/^analyze:(\d+)$/, async (ctx) => {
+  const gameId = ctx.match[1];
+  const chatId = ctx.chat.id;
+
+  try {
+    // Editar el mensaje original para quitar el botón y evitar pulsaciones múltiples
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+    
+    // Avisar que se inicia el análisis
+    const statusMsg = await ctx.reply("⏳ Analizando tablero para sugerirte movimientos...");
+    
+    // Ejecutar análisis estratégico
+    await analyzeAndReply(gameId, chatId, statusMsg.message_id);
+    
+    // Confirmar callback de Telegram
+    await ctx.answerCbQuery("Análisis completado");
+  } catch (err) {
+    console.error("[Bot] Error en callback de análisis:", err);
+    await ctx.reply(`❌ Error en el análisis de tu turno: ${err.message}`);
+    await ctx.answerCbQuery("Error al analizar");
+  }
 });
 
 // Lanzar el bot
