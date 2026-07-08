@@ -5,6 +5,23 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 
+// Helper para realizar peticiones HTTP con un límite de tiempo (timeout)
+const fetchWithTimeout = async (url, options = {}, timeout = 8000) => {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+};
+
 // Cargar variables de entorno
 dotenv.config();
 
@@ -202,13 +219,23 @@ Calcula y muestra el dinero (Cash) y el valor neto (Worth) estimado de cada uno 
   const jsonUrl = `https://18xx.games/api/game/${gameId}`;
   console.log(`[Bot] Obteniendo JSON de la partida desde: ${jsonUrl}`);
 
-  const response = await fetch(jsonUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'application/json'
-    }
-  });
+  let response;
+  try {
+    response = await fetchWithTimeout(jsonUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
+      }
+    }, 10000); // 10 segundos de timeout
+  } catch (fetchErr) {
+    console.error(`[Bot] Error de red al consultar la API de 18xx.games:`, fetchErr);
+    throw new Error(`Timeout o error de red al conectar con 18xx.games. El servidor de 18xx.games suele bloquear o dar timeout a servidores en la nube (como Render/AWS). Te sugerimos analizar la partida con la extensión de Chrome de 18xx Gemini Copilot.`);
+  }
+
   if (!response.ok) {
+    if (response.status === 404 || response.status === 403 || response.status === 401) {
+      throw new Error(`No se pudo acceder a la partida (Código: ${response.status}). Asegúrate de que la partida sea pública. Si la partida es privada, usa la extensión de Chrome en tu navegador.`);
+    }
     throw new Error(`No se pudo obtener la partida (Código: ${response.status})`);
   }
 
@@ -459,12 +486,12 @@ const server = http.createServer((req, res) => {
             }
 
             try {
-              const res = await fetch(`https://18xx.games/api/game/${gameId}`, {
+              const res = await fetchWithTimeout(`https://18xx.games/api/game/${gameId}`, {
                 headers: {
                   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                   'Accept': 'application/json'
                 }
-              });
+              }, 5000); // 5 segundos de timeout
               if (res.ok) {
                 const data = await res.json();
                 gameTitle = data.title || gameTitle;
