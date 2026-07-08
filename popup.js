@@ -141,37 +141,62 @@ analyzeBtn.addEventListener('click', async () => {
     console.log("Copilot: Botón clickeado. Obteniendo pestaña activa...");
 
     try {
-        // 1. Pedir los datos de la partida al Content Script
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         
-        if (!tab || !tab.id) {
+        if (!tab || !tab.id || !tab.url) {
             console.warn("Copilot: No se detectó ninguna pestaña activa.");
             outputDiv.innerHTML = '<div class="error">No se detectó ninguna pestaña activa. Por favor, asegúrate de estar en la página de la partida.</div>';
             return;
         }
 
-        console.log(`Copilot: Enviando mensaje 'getGameData' a la pestaña ID ${tab.id}...`);
+        let gameData = null;
+        let fetchError = null;
 
-        let response;
+        // 1. Intentar obtener el ID de partida directamente de la URL de la pestaña activa
         try {
-            response = await chrome.tabs.sendMessage(tab.id, { action: "getGameData" });
-        } catch (msgError) {
-            console.error("Copilot: Error de conexión al content script:", msgError);
-            outputDiv.innerHTML = '<div class="error"><strong>Error de conexión:</strong> Por favor, <strong>recarga la pestaña de la partida</strong> en 18xx.games y vuelve a intentarlo para activar el Copilot.</div>';
-            return;
+            const parsedUrl = new URL(tab.url);
+            const match = parsedUrl.pathname.match(/\/game\/(\d+)/);
+            if (match) {
+                const gameId = match[1];
+                const origin = parsedUrl.origin;
+                const apiUrl = `${origin}/api/game/${gameId}`;
+                console.log(`Copilot: Intentando fetch directo a la API desde el popup: ${apiUrl}`);
+                const apiResponse = await fetch(apiUrl);
+                if (apiResponse.ok) {
+                    gameData = await apiResponse.json();
+                    console.log("Copilot: JSON obtenido con éxito desde la API en el popup.");
+                } else {
+                    throw new Error(`API HTTP Error: ${apiResponse.status}`);
+                }
+            }
+        } catch (err) {
+            console.warn("Copilot: Falló el fetch desde el popup, recurriendo a content script:", err.message);
+            fetchError = err.message;
         }
 
-        console.log("Copilot: Respuesta recibida del content script:", response);
+        // 2. Si no pudimos obtener los datos de la API (o no hay ID de partida en la URL), preguntamos al content script
+        if (!gameData) {
+            console.log("Copilot: Solicitando extracción de datos al content script...");
+            let response;
+            try {
+                response = await chrome.tabs.sendMessage(tab.id, { action: "getGameData" });
+            } catch (msgError) {
+                console.error("Copilot: Error de conexión al content script:", msgError);
+                outputDiv.innerHTML = '<div class="error"><strong>Error de conexión:</strong> Por favor, <strong>recarga la pestaña de la partida</strong> en 18xx.games y vuelve a intentarlo para activar el Copilot.</div>';
+                return;
+            }
 
-        if (!response || !response.success) {
-            const errMsg = response?.error || "Asegúrate de estar en una pestaña activa de partida de 18xx.games.";
-            console.warn("Copilot: Error en respuesta de datos:", errMsg);
-            showError("Error al obtener datos:", errMsg);
-            return;
+            if (response && response.success) {
+                gameData = response.gameData;
+            } else {
+                const errMsg = response?.error || fetchError || "Asegúrate de estar en una pestaña activa de partida de 18xx.games.";
+                console.warn("Copilot: Error al obtener datos de partida:", errMsg);
+                showError("Error al obtener datos:", errMsg);
+                return;
+            }
         }
 
-        // Limitar y limpiar el historial de acciones (máximo 100) para optimizar el contexto en modelos gratuitos
-        const prunedGameData = { ...response.gameData };
+        const prunedGameData = { ...gameData };
         if (Array.isArray(prunedGameData.actions)) {
             prunedGameData.actions = prunedGameData.actions.map(act => {
                 const cleanAct = { ...act };
