@@ -428,17 +428,34 @@ const server = http.createServer((req, res) => {
             let gameDesc = "";
             
             // Intentar parsear el título y la descripción directamente del texto del webhook
-            // El formato típico de 18xx.games es: "<@chatId> it's your turn in <Title> game #<ID> (<Description>)"
+            // Soporta múltiples formatos de 18xx.games (con comillas, "game #ID" y paréntesis)
             const webhookText = text.trim();
-            const titleRegexMatch = webhookText.match(/in\s+([A-Za-z0-9+/_\-]+)\s+game/i);
-            if (titleRegexMatch) {
-              gameTitle = titleRegexMatch[1];
-            }
-            
-            // Intentar extraer la descripción si viene entre paréntesis al final
-            const descRegexMatch = webhookText.match(/\(([^)]+)\)\s*$/);
-            if (descRegexMatch) {
-              gameDesc = descRegexMatch[1].trim();
+            const turnMatch = webhookText.match(/your\s+turn\s+in\s+(.+)$/i);
+            if (turnMatch) {
+              const line = turnMatch[1].split('\n')[0].trim();
+              
+              const quoteMatch = line.match(/^([^"]+)"([^"]+)"/);
+              if (quoteMatch) {
+                gameTitle = quoteMatch[1].trim();
+                gameDesc = quoteMatch[2].trim();
+                
+                const extraMatch = line.match(/\(([^)]+)\)\s*$/);
+                if (extraMatch) {
+                  gameDesc += ` (${extraMatch[1].trim()})`;
+                }
+              } else {
+                const gameRegexMatch = line.match(/^(.+?)\s+game\s+#\d+/i);
+                if (gameRegexMatch) {
+                  gameTitle = gameRegexMatch[1].trim();
+                  
+                  const parenMatch = line.match(/\(([^)]+)\)\s*$/);
+                  if (parenMatch) {
+                    gameDesc = parenMatch[1].trim();
+                  }
+                } else {
+                  gameTitle = line;
+                }
+              }
             }
 
             try {
