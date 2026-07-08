@@ -115,7 +115,8 @@ bot.start((ctx) => {
     `Soy tu asistente estratégico de IA para partidas de <b>18xx.games</b>.\n\n` +
     `<b>¿Cómo usarme?</b>\n` +
     `1. Envía el enlace de una partida en curso (ej: <code>https://18xx.games/game/254383</code>) o simplemente el ID numérico de la partida (ej: <code>254383</code>).\n` +
-    `2. Analizaré el estado actual y te daré 3 consejos estratégicos clave.\n\n` +
+    `2. Si es una partida privada o el servidor de 18xx.games da timeout, puedes **descargar el JSON de la partida** (desde la pestaña 'Tools' en 18xx.games) y **subir el archivo .json** directamente a este chat.\n` +
+    `3. Analizaré el estado actual y te daré 3 consejos estratégicos clave.\n\n` +
     `<b>Comandos útiles:</b>\n` +
     `• /username [tu_usuario] - Asocia tu nombre de 18xx.games para recibir consejos personalizados.\n` +
     `• /myusername - Consulta qué nombre de usuario tienes asociado.\n` +
@@ -130,13 +131,14 @@ bot.help((ctx) => {
   ctx.reply(
     `📖 <b>Ayuda de ChooChooCopilotBot</b>\n\n` +
     `• <b>Análisis de partida:</b> Envía un enlace de 18xx.games o un ID numérico de partida. El bot obtendrá los datos del juego de forma segura y consultará con Gemini.\n\n` +
+    `• <b>Análisis por archivo JSON:</b> Si la partida es privada o hay problemas de conexión del servidor, descarga el JSON de la partida (pestaña 'Tools' en 18xx.games) y súbelo (.json) a este chat.\n\n` +
     `• <b>Asociar usuario:</b> Si usas <code>/username tu_usuario</code>, el bot sabrá quién eres. Así, cuando analice una partida:\n` +
     `   - Si es tu turno, te dará consejos directos para tu jugada.\n` +
     `   - Si no es tu turno, te dirá de quién es y te dará consejos de planificación para cuando te toque.\n\n` +
     `<b>Ejemplos de enlace de partida:</b>\n` +
     `• <code>https://18xx.games/game/254383</code>\n` +
     `• <code>254383</code>\n\n` +
-    `💡 <i>Nota: Para que el análisis funcione, la partida debe ser pública en 18xx.games.</i>`,
+    `💡 <i>Nota: Para que el análisis por enlace funcione, la partida debe ser pública. Para partidas privadas, usa la subida del archivo .json.</i>`,
     { parse_mode: 'HTML' }
   );
 });
@@ -190,10 +192,38 @@ bot.command('mychatid', (ctx) => {
   );
 });
 
-// Función para realizar el análisis estratégico de una partida y enviar el resultado a Telegram
+// Función para realizar el análisis estratégico de una partida y enviar el resultado a Telegram (descarga desde URL)
 async function analyzeAndReply(gameId, chatId, targetMsgId = null, manualUsername = "") {
+  const jsonUrl = `https://18xx.games/api/game/${gameId}`;
+  console.log(`[Bot] Obteniendo JSON de la partida desde: ${jsonUrl}`);
+
+  let response;
+  try {
+    response = await fetchWithTimeout(jsonUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
+      }
+    }, 10000); // 10 segundos de timeout
+  } catch (fetchErr) {
+    console.error(`[Bot] Error de red al consultar la API de 18xx.games:`, fetchErr);
+    throw new Error(`Timeout o error de red al conectar con 18xx.games. El servidor de 18xx.games suele bloquear o dar timeout a servidores en la nube (como Render/AWS). Te sugerimos descargar el archivo .json de la partida y subirlo directamente a este chat.`);
+  }
+
+  if (!response.ok) {
+    if (response.status === 404 || response.status === 403 || response.status === 401) {
+      throw new Error(`No se pudo acceder a la partida (Código: ${response.status}). Asegúrate de que la partida sea pública. Si la partida es privada, descarga el archivo .json de la partida en tu navegador y súbelo a este chat.`);
+    }
+    throw new Error(`No se pudo obtener la partida (Código: ${response.status})`);
+  }
+
+  const gameData = await response.json();
+  await analyzeGameDataAndReply(gameData, gameId, chatId, targetMsgId, manualUsername);
+}
+
+// Analizar un objeto de datos de partida (JSON) ya obtenido y responder
+async function analyzeGameDataAndReply(gameData, gameId, chatId, targetMsgId = null, manualUsername = "") {
   let targetInstructions = '';
-  // Si se pasa un nombre en el mismo mensaje, tiene prioridad; si no, se usa el guardado persistente
   const targetUsername = manualUsername || userSessions.get(chatId.toString());
 
   const generalInstructions = `
@@ -215,31 +245,6 @@ Calcula y muestra el dinero (Cash) y el valor neto (Worth) estimado de cada uno 
 - Identifica el tipo de ronda actual ("round").
 - Recomienda las 3 mejores opciones o movimientos para el jugador activo, justificando cuál de ellas es la mejor decisión estratégica inmediata (acciones a realizar en la ronda actual).`;
   }
-
-  const jsonUrl = `https://18xx.games/api/game/${gameId}`;
-  console.log(`[Bot] Obteniendo JSON de la partida desde: ${jsonUrl}`);
-
-  let response;
-  try {
-    response = await fetchWithTimeout(jsonUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json'
-      }
-    }, 10000); // 10 segundos de timeout
-  } catch (fetchErr) {
-    console.error(`[Bot] Error de red al consultar la API de 18xx.games:`, fetchErr);
-    throw new Error(`Timeout o error de red al conectar con 18xx.games. El servidor de 18xx.games suele bloquear o dar timeout a servidores en la nube (como Render/AWS). Te sugerimos analizar la partida con la extensión de Chrome de 18xx Gemini Copilot.`);
-  }
-
-  if (!response.ok) {
-    if (response.status === 404 || response.status === 403 || response.status === 401) {
-      throw new Error(`No se pudo acceder a la partida (Código: ${response.status}). Asegúrate de que la partida sea pública. Si la partida es privada, usa la extensión de Chrome en tu navegador.`);
-    }
-    throw new Error(`No se pudo obtener la partida (Código: ${response.status})`);
-  }
-
-  const gameData = await response.json();
 
   // Limitar y limpiar el historial de acciones (máximo 100) para optimizar el contexto en modelos gratuitos
   const prunedGameData = { ...gameData };
@@ -299,21 +304,19 @@ ${JSON.stringify(prunedGameData)}`;
     });
 
     if (!apiResponse.ok) {
-      let detailedError = "";
-      try {
-        const errorJson = await apiResponse.json();
-        detailedError = errorJson.error?.message || JSON.stringify(errorJson);
-      } catch (_) {
-        detailedError = apiResponse.statusText || `Código de estado: ${apiResponse.status}`;
-      }
-      throw new Error(`OpenRouter Error: ${detailedError}`);
+      const errText = await apiResponse.text();
+      throw new Error(`OpenRouter Error: ${errText || apiResponse.status}`);
     }
 
     const resJson = await apiResponse.json();
     if (!resJson.choices || resJson.choices.length === 0) {
-      throw new Error("No se recibió respuesta de OpenRouter.");
+      throw new Error("No choices returned from OpenRouter.");
     }
-    aiText = resJson.choices[0].message?.content || "";
+    const choice = resJson.choices[0];
+    if (choice.message && choice.message.refusal) {
+      throw new Error(choice.message.refusal);
+    }
+    aiText = choice.message?.content || "";
     console.log("[Bot] Análisis completado con éxito desde OpenRouter.");
 
   } else {
@@ -355,11 +358,15 @@ ${JSON.stringify(prunedGameData)}`;
   const formattedRound = formatRound(gameData.round, gameData.turn);
   const formattedAiText = formatMarkdownToHtml(aiText);
 
-  const finalMessage = `📋 <b>Análisis Estratégico [${gameTitle}]</b>\n` +
+  let finalMessage = `📋 <b>Análisis Estratégico [${gameTitle}]</b>\n` +
                        `🎮 <i>${gameDesc}</i>\n` +
-                       `📅 <b>Fase:</b> ${formattedRound}\n` +
-                       `🔗 <a href="https://18xx.games/game/${gameId}">Abrir partida #${gameId}</a>\n\n` +
-                       `${formattedAiText}`;
+                       `📅 <b>Fase:</b> ${formattedRound}\n`;
+  if (gameId) {
+    finalMessage += `🔗 <a href="https://18xx.games/game/${gameId}">Abrir partida #${gameId}</a>\n\n`;
+  } else {
+    finalMessage += `🔗 <i>Partida cargada localmente por archivo</i>\n\n`;
+  }
+  finalMessage += `${formattedAiText}`;
 
   if (targetMsgId) {
     await bot.telegram.editMessageText(
@@ -419,7 +426,49 @@ bot.on('text', async (ctx) => {
       ctx.chat.id,
       statusMsg.message_id,
       null,
-      `❌ Error al analizar la partida: ${err.message}\n\n💡 Asegúrate de que el enlace o ID sea correcto y que la partida sea pública.`
+      `❌ Error al analizar la partida: ${err.message}`
+    );
+  }
+});
+
+// Escuchar cuando el usuario sube un archivo (para analizar partidas privadas vía JSON descargado)
+bot.on('document', async (ctx) => {
+  const doc = ctx.message.document;
+  
+  if (!doc.file_name || !doc.file_name.toLowerCase().endsWith('.json')) {
+    // Si no es un JSON, ignoramos para no interferir con otros archivos
+    return;
+  }
+
+  const statusMsg = await ctx.reply("📥 Procesando archivo JSON y analizando partida...");
+
+  try {
+    const fileId = doc.file_id;
+    const fileLink = await ctx.telegram.getFileLink(fileId);
+    
+    const res = await fetch(fileLink.href);
+    if (!res.ok) {
+      throw new Error(`Error al descargar el archivo desde Telegram (Status: ${res.status})`);
+    }
+    
+    const gameData = await res.json();
+    
+    // Verificar si tiene estructura mínima de partida de 18xx
+    if (!gameData || (!gameData.id && !gameData.players)) {
+      throw new Error("El archivo JSON no parece ser una partida válida de 18xx.games (falta ID o jugadores).");
+    }
+
+    const gameId = gameData.id || null;
+    
+    await analyzeGameDataAndReply(gameData, gameId, ctx.chat.id, statusMsg.message_id);
+    console.log(`[Bot] Análisis completado con éxito mediante archivo JSON para la partida ${gameId || 'Local'}.`);
+  } catch (err) {
+    console.error(`[Bot] Error procesando archivo JSON:`, err);
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      statusMsg.message_id,
+      null,
+      `❌ Error al procesar el archivo JSON: ${err.message}\n\n💡 Asegúrate de que el archivo JSON haya sido descargado directamente de la pestaña 'Tools' de tu partida en 18xx.games.`
     );
   }
 });
@@ -457,7 +506,7 @@ const server = http.createServer((req, res) => {
             // Intentar parsear el título y la descripción directamente del texto del webhook
             // Soporta múltiples formatos de 18xx.games (con comillas, "game #ID" y paréntesis)
             const webhookText = text.trim();
-            const turnMatch = webhookText.match(/your\s+turn\s+in\s+(.+)$/i);
+            const turnMatch = webhookText.match(/your\s+turn\s+in\s+(.+)/i);
             if (turnMatch) {
               const line = turnMatch[1].split('\n')[0].trim();
               
@@ -586,5 +635,3 @@ process.once('SIGTERM', () => {
   server.close();
   bot.stop('SIGTERM');
 });
-
-
