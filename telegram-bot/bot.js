@@ -426,6 +426,21 @@ const server = http.createServer((req, res) => {
             // Pre-obtener los metadatos de la partida (título y descripción) para la notificación inicial
             let gameTitle = "18xx";
             let gameDesc = "";
+            
+            // Intentar parsear el título y la descripción directamente del texto del webhook
+            // El formato típico de 18xx.games es: "<@chatId> it's your turn in <Title> game #<ID> (<Description>)"
+            const webhookText = text.trim();
+            const titleRegexMatch = webhookText.match(/in\s+([A-Za-z0-9+/_\-]+)\s+game/i);
+            if (titleRegexMatch) {
+              gameTitle = titleRegexMatch[1];
+            }
+            
+            // Intentar extraer la descripción si viene entre paréntesis al final
+            const descRegexMatch = webhookText.match(/\(([^)]+)\)\s*$/);
+            if (descRegexMatch) {
+              gameDesc = descRegexMatch[1].trim();
+            }
+
             try {
               const res = await fetch(`https://18xx.games/api/game/${gameId}`, {
                 headers: {
@@ -435,8 +450,8 @@ const server = http.createServer((req, res) => {
               });
               if (res.ok) {
                 const data = await res.json();
-                gameTitle = data.title || "18xx";
-                gameDesc = data.description || "";
+                gameTitle = data.title || gameTitle;
+                gameDesc = data.description || gameDesc;
               }
             } catch (err) {
               console.warn("⚠️ No se pudo pre-obtener datos de la partida:", err.message);
